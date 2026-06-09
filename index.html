@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DuckDB Extension Availability</title>
+<style>
+  :root {
+    --fg: #1d1d1f;
+    --muted: #6b6f76;
+    --line: #e3e5e8;
+    --bg: #fbfbfc;
+    --card: #fff;
+    --accent: #fff000;
+    --accent-ink: #111;
+    --new: #1a7f37;
+    --gone: #cf222e;
+    --grow: #bc4c00;
+    --shrink: #1a7f37;
+    --absent: #aab0b8;
+    --core: #0969da;
+    --comm: #8250df;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    color: var(--fg); background: var(--bg); margin: 0;
+    font-size: 14px; line-height: 1.45;
+  }
+  header {
+    padding: 18px 24px; border-bottom: 1px solid var(--line);
+    background: var(--card); position: sticky; top: 0; z-index: 30;
+  }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  h1 .logo { height: 22px; width: 22px; vertical-align: -4px; }
+  .sub { color: var(--muted); font-size: 12.5px; }
+  main { padding: 20px 24px 80px; max-width: 100%; }
+
+  .controls {
+    display: grid; gap: 14px;
+    grid-template-columns: 1fr 1fr; align-items: end;
+    margin-bottom: 16px;
+  }
+  .field label { display: block; font-weight: 600; font-size: 12px; margin-bottom: 4px; }
+  .field .hint { color: var(--muted); font-weight: 400; }
+  input[type=text] {
+    width: 100%; padding: 9px 11px; font-size: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    border: 1px solid var(--line); border-radius: 7px; background: #fff;
+  }
+  input[type=text]:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+  .options {
+    display: flex; flex-wrap: wrap; gap: 16px 22px; align-items: center;
+    padding: 12px 14px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 8px; margin-bottom: 16px;
+  }
+  .options label { font-size: 13px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .options .platforms { flex: 1 1 360px; min-width: 280px; }
+  .options .platforms input { font-size: 12px; padding: 6px 9px; }
+
+  .platform-box { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 4px 14px; margin-bottom: 16px; }
+  .fam-row { display: flex; align-items: center; gap: 6px 16px; padding: 9px 0; flex-wrap: wrap; }
+  .fam-row + .fam-row { border-top: 1px dashed var(--line); }
+  .fam-name {
+    flex: 0 0 84px; font-weight: 700; font-size: 12.5px; text-transform: capitalize;
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  }
+  .fam-row label.arch {
+    font-size: 12.5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+    font-family: ui-monospace, Menlo, monospace; color: var(--fg);
+  }
+  .fam-sep { color: var(--line); }
+  button.go {
+    padding: 10px 22px; font-size: 14px; font-weight: 700; cursor: pointer;
+    background: var(--core); color: #fff; border: 1px solid var(--core);
+    border-radius: 8px;
+  }
+  button.go:hover { background: #0860c4; }
+  button.go:disabled { opacity: .5; cursor: default; }
+
+  .bar-wrap { margin: 14px 0; display: none; }
+  .bar-wrap.on { display: block; }
+  .bar { height: 8px; background: var(--line); border-radius: 6px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  .bar-label { font-size: 12px; color: var(--muted); margin-top: 5px; }
+
+  .summary { display: flex; flex-wrap: wrap; gap: 18px; margin: 4px 0 18px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 9px 14px; }
+  .stat b { font-size: 18px; display: block; }
+  .stat span { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+
+  .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .toolbar input { width: 340px; }
+  .legend { font-size: 12px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
+  .legend i { font-style: normal; padding: 1px 7px; border-radius: 4px; font-weight: 600; }
+  .chip-new { background: #dafbe1; color: var(--new); }
+  .chip-gone { background: #ffebe9; color: var(--gone); }
+  .chip-grow { color: var(--grow); }
+  .chip-shrink { color: var(--shrink); }
+
+  .table-scroll { overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; table-layout: fixed; }
+  /* Info columns get fixed widths; platform columns are auto, so under fixed layout
+     they split the remaining width equally (= available space / #platforms). */
+  col.col-ext { width: 210px; }
+  col.col-dl { width: 85px; }
+  col.col-spark { width: 100px; }
+  th.plat-col, td.plat-col { padding-left: 3px; padding-right: 3px; }
+  th, td { padding: 6px 9px; text-align: center; white-space: nowrap; border-bottom: 1px solid var(--line); }
+  thead th { position: sticky; top: 0; background: #f3f4f6; z-index: 10; font-weight: 700; text-align: center; }
+  th.ext, td.ext {
+    text-align: center; position: sticky; left: 0; background: var(--card);
+    z-index: 5; font-family: ui-monospace, Menlo, monospace; font-weight: 600; border-right: 1px solid var(--line);
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  thead th.ext { z-index: 20; background: #f3f4f6; top: 0; }
+  thead th.fam-head {
+    top: 0; text-align: center; font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: #eceef1; border-bottom: 1px solid var(--line);
+    border-left: 2px solid #ccd0d5;
+  }
+  thead tr.arch-head th {
+    top: 31px; font-size: 9.5px; font-weight: 600;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  /* Family separators live in the header only — not down through the data cells. */
+  thead tr.arch-head th.fam-start { border-left: 2px solid #ccd0d5; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { background: #e7e9ec; }
+  .sort-hint { color: #aab0b8; font-size: 11px; font-weight: 400; }
+  th.sortable:hover .sort-hint { color: var(--muted); }
+  th.dl, td.dl { text-align: right; font-variant-numeric: tabular-nums; }
+  td.dl { color: var(--muted); }
+  th.spark-h, td.spark-c { text-align: center; }
+  .spark { vertical-align: middle; }
+  /* Sparkline stroke (currentColor) matches the repo's badge color. */
+  td.spark-core { color: var(--core); }
+  td.spark-core_nightly { color: #9a6700; }
+  td.spark-community { color: var(--comm); }
+  tbody tr:hover td { background: #fafbe8; }
+  tbody tr:hover td.ext { background: #f5f6c8; }
+  .repo-tag { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px; margin-left: 6px; vertical-align: middle; }
+  .repo-core { background: #ddf4ff; color: var(--core); }
+  .repo-nightly { background: #fff1d6; color: #9a6700; }
+  .repo-comm { background: #fbefff; color: var(--comm); }
+
+  td.cell-absent { color: var(--absent); }
+  td.cell-avail { color: var(--new); font-weight: 600; }
+  td.cell-pending::after { content: "·"; color: #e2e5e9; } /* not yet scanned */
+  /* "Present" marker: the DuckDB duck beak — small, centered, same color as the numbers. */
+  svg.present { display: inline-block; height: 9px; width: auto; vertical-align: middle; color: var(--muted); }
+  td.cell-new { background: #dafbe1; color: var(--new); font-weight: 600; }
+  td.cell-gone { background: #ffebe9; color: var(--gone); font-weight: 600; }
+  td.cell-grow { color: var(--grow); }
+  td.cell-shrink { color: var(--shrink); }
+  td .delta { font-size: 10.5px; color: var(--muted); display: block; }
+  td.cell-grow .delta { color: var(--grow); }
+  td.cell-shrink .delta { color: var(--shrink); }
+
+  .err { background: #ffebe9; border: 1px solid #ffcecb; color: #82071e; padding: 12px 14px; border-radius: 8px; margin: 14px 0; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 22px; }
+  code { font-family: ui-monospace, Menlo, monospace; background: #f0f1f3; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><svg class="logo" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg" aria-label="DuckDB">
+    <path fill="#1d1d1b" d="M249.9996737,500C111.9320267,500,0,388.068425,0,250.0000251,0,111.9318259,111.3637372,0,249.9996737,0,388.6367145,0,500,111.9318259,500,250.0000251c0,138.0683999-111.9317506,249.9999749-250.0003263,249.9999749Z"/>
+    <path fill="#fff100" d="M190.0545045,146.5907724c-56.8184727,0-103.4089829,46.5908427-103.4089829,103.4092276,0,57.3868501,46.5905102,103.4092401,103.4089829,103.4092401,56.8183974,0,103.4091523-46.5908552,103.4091523-103.4092401s-46.5907549-103.4092401-103.4091523-103.4092276Z"/>
+    <path fill="#fff100" d="M376.1380597,212.7835876h-49.1467777v74.432875h49.1467777c20.5540155,0,37.2164375-16.6623467,37.2164375-37.2164375v-.0000753c0-20.5540155-16.662422-37.2163622-37.2164375-37.2163622Z"/>
+  </svg> DuckDB Extension Availability</h1>
+  <div class="sub">Live availability &amp; size matrix of core + community extensions across platforms — single release or A↔B diff.</div>
+</header>
+
+<main>
+  <div class="controls">
+    <div class="field">
+      <label>Release A <span class="hint">— <code>version</code> or <code>version | sha</code></span></label>
+      <input type="text" id="relA" value="v1.5.3" placeholder="v1.5.3 | abcde12345" autocomplete="off" />
+    </div>
+    <div class="field">
+      <label>Release B <span class="hint">— optional, enables diff</span></label>
+      <input type="text" id="relB" placeholder="v1.4.1 | (sha)" autocomplete="off" />
+    </div>
+  </div>
+
+  <div class="options">
+    <span class="opt-group"><b>Repositories:</b>
+      <label><input type="checkbox" id="opt-core" checked /> core</label>
+      <label><input type="checkbox" id="opt-core_nightly" /> core_nightly</label>
+      <label><input type="checkbox" id="opt-community" /> community <span class="hint" style="color:var(--muted)">(244 — slower)</span></label>
+    </span>
+    <label><input type="checkbox" id="optSizes" /> Show sizes</label>
+    <label><input type="checkbox" id="optStats" checked /> Download stats</label>
+    <label><input type="checkbox" id="optSpark" checked /> Sparkline</label>
+    <button class="go" id="goBtn">Compare</button>
+  </div>
+
+  <div class="bar-wrap" id="barWrap">
+    <div class="bar"><i id="barFill"></i></div>
+    <div class="bar-label" id="barLabel"></div>
+  </div>
+
+  <div id="errBox"></div>
+  <div id="summary" class="summary" style="display:none"></div>
+
+  <div class="toolbar" id="toolbar" style="display:none">
+    <input type="text" id="filter" placeholder="Filter extensions… (space-separated, e.g. httpfs iceberg)" autocomplete="off" />
+    <span class="legend" id="legend"></span>
+  </div>
+
+  <div class="table-scroll" id="tableWrap" style="display:none">
+    <table id="grid"></table>
+  </div>
+
+  <div class="note">
+    Sizes come from <code>HEAD</code> requests to <code>extensions.duckdb.org</code> /
+    <code>community-extensions.duckdb.org</code> (<code>content-length</code>). A blank cell means the
+    artifact returned 404 for that platform — i.e. a visibility gap. A <span id="presentLegend"></span>
+    means the artifact exists but the server didn't expose a size — wasm targets ship
+    <code>.duckdb_extension.wasm</code> served dynamically with no <code>content-length</code>. Extension lists are
+    fetched live from each repo's <code>downloads-last-week.json</code>.
+  </div>
+</main>
+
+<script>
+// ---- Config -------------------------------------------------------------
+// Repositories, in display order. Each enumerates its extensions from the repo's
+// live downloads-last-week.json and serves artifacts from <base>/<token>/<platform>/.
+const REPOS = {
+  // `extra` augments the downloads-index list with always-known names (e.g. quack).
+  core:         { base: "https://extensions.duckdb.org",           label: "core",      tag: "repo-core", extra: ["quack"] },
+  // Nightly has no index of its own — it reuses core's extension list (indexFrom).
+  core_nightly: { base: "https://nightly-extensions.duckdb.org",   label: "nightly",   tag: "repo-nightly", indexFrom: "core" },
+  community:    { base: "https://community-extensions.duckdb.org", label: "community", tag: "repo-comm" },
+};
+const REPO_ORDER = Object.keys(REPOS);
+for (const id of REPO_ORDER) REPOS[id].index = REPOS[id].base + "/downloads-last-week.json";
+
+function repoBadge(repo) {
+  const r = REPOS[repo];
+  return `<span class="repo-tag ${r.tag}">${r.label}</span>`;
+}
+
+// No listing primitive exists for platforms — this is the one maintained constant.
+// Grouped by family; the per-arch label strips the family prefix to avoid repetition.
+const PLATFORM_FAMILIES = {
+  linux:   ["linux_amd64", "linux_arm64", "linux_amd64_musl", "linux_arm64_musl"],
+  osx:     ["osx_amd64", "osx_arm64"],
+  windows: ["windows_amd64", "windows_amd64_mingw", "windows_arm64"],
+  wasm:    ["wasm_mvp", "wasm_eh", "wasm_threads"],
+};
+
+const CONCURRENCY = 40;
+
+// Per-extension download-stat columns, each an average over the last `weeks`
+// available weekly snapshots (weeks:1 = just the latest week). Add/edit freely.
+const STAT_COLUMNS = [
+  { key: "last",  label: "last wk",  weeks: 1 },
+  { key: "avg4",  label: "avg 4wk",  weeks: 4 },
+  { key: "avg12", label: "avg 12wk", weeks: 12 },
+];
+const STAT_WEEKS = Math.max(...STAT_COLUMNS.map((c) => c.weeks)); // history depth needed
+
+// Extensions to hide, keyed by "name@repo". These appear in the download stats but
+// aren't distributed as standalone artifacts, so they'd render as all-gap noise.
+const EXCLUDE = new Set([
+  "arrow@core",        // not distributed as a standalone artifact
+  "uc_catalog@core",   // alias of unity_catalog@core
+  "substrait@core",    // not distributed as a standalone artifact
+]);
+
+// ---- DOM ----------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+
+// All platforms are always scanned, in family order.
+const ALL_PLATFORMS = Object.values(PLATFORM_FAMILIES).flat();
+
+// Short arch label, family prefix stripped: "linux_amd64_musl" -> "amd64_musl".
+function shortArch(fam, platform) {
+  return platform.startsWith(fam + "_") ? platform.slice(fam.length + 1) : platform;
+}
+
+// Group a flat platform list into [{fam, plats}] in family order, families present only.
+function groupPlatforms(platforms) {
+  const out = [];
+  const claimed = new Set();
+  for (const [fam, plats] of Object.entries(PLATFORM_FAMILIES)) {
+    const present = plats.filter((p) => platforms.includes(p));
+    present.forEach((p) => claimed.add(p));
+    if (present.length) out.push({ fam, plats: present });
+  }
+  const others = platforms.filter((p) => !claimed.has(p));
+  if (others.length) out.push({ fam: "other", plats: others });
+  return out;
+}
+
+// ---- Helpers ------------------------------------------------------------
+function sizeFmt(n) {
+  if (n == null) return "";
+  const u = ["B", "KiB", "MiB", "GiB"];
+  let i = 0, v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? v : v.toFixed(1)) + " " + u[i];
+}
+
+// "Present" marker — just the duck's beak from the DuckDB icon (the rounded,
+// D-like shape), in dark, centered. Tight viewBox around the beak path.
+const PRESENT_MARK =
+  '<svg class="present" viewBox="326.99 212.78 86.4 74.5" xmlns="http://www.w3.org/2000/svg" aria-label="present">' +
+  '<path fill="currentColor" d="M376.1380597,212.7835876h-49.1467777v74.432875h49.1467777c20.5540155,0,37.2164375-16.6623467,37.2164375-37.2164375v-.0000753c0-20.5540155-16.662422-37.2163622-37.2164375-37.2163622Z"/>' +
+  '</svg>';
+
+// Available, but the server did not expose a size (e.g. wasm artifacts served
+// dynamically with no content-length) — show the present marker instead of a size.
+function sizeOrAvail(n) { return n == null ? PRESENT_MARK : sizeFmt(n); }
+
+function dlFmt(n) { return n == null ? "—" : Math.round(n).toLocaleString("en-US"); }
+
+function weekKey(y, w) { return `${y}-${w}`; }
+function prevWeek(y, w) { return w > 1 ? { year: y, week: w - 1 } : { year: y - 1, week: isoWeeksInYear(y - 1) }; }
+
+// Average over the PUBLISHED weeks within the last `weeks` CALENDAR weeks, ending at
+// the most-recent published snapshot. Missing weeks are excluded from the divisor:
+// e.g. if N, N-1, N-3 are published (N-2 missing), avg 4wk = mean of those 3 values.
+function avgLastWeeks(hist, name, weeks) {
+  if (!hist || !hist.length) return null;
+  const wanted = new Set();
+  let cur = { year: hist[hist.length - 1].year, week: hist[hist.length - 1].week };
+  for (let i = 0; i < weeks; i++) { wanted.add(weekKey(cur.year, cur.week)); cur = prevWeek(cur.year, cur.week); }
+  const inWindow = hist.filter((h) => wanted.has(weekKey(h.year, h.week)));
+  if (!inWindow.length) return null;
+  return inWindow.reduce((s, h) => s + (h.counts[name] ?? 0), 0) / inWindow.length;
+}
+
+// Inline SVG sparkline from a numeric series; last point marked.
+function sparkline(series) {
+  const vals = series.map((v) => (v == null ? 0 : v));
+  if (vals.length < 2) return "—";
+  const w = 88, h = 18, pad = 2;
+  const max = Math.max(...vals), min = Math.min(...vals), range = max - min || 1, n = vals.length;
+  const pts = vals.map((v, i) => {
+    const x = pad + (i / (n - 1)) * (w - 2 * pad);
+    const y = h - pad - ((v - min) / range) * (h - 2 * pad);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const [lx, ly] = pts[n - 1].split(",");
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+    `<polyline points="${pts.join(" ")}" fill="none" stroke="currentColor" stroke-width="1.4"/>` +
+    `<circle cx="${lx}" cy="${ly}" r="1.8" fill="currentColor"/></svg>`;
+}
+
+// Sort state for the extension rows. Toggled by clicking a column header.
+// key is "name" or a STAT_COLUMNS key (last / avg4 / avg12).
+const SORT = { key: "name", dir: "asc" };
+function sortExtensions(list) {
+  const mul = SORT.dir === "asc" ? 1 : -1;
+  return [...list].sort((a, b) => {
+    if (SORT.key === "name") return a.name.localeCompare(b.name) * mul;
+    const av = a.stats?.[SORT.key] ?? -1, bv = b.stats?.[SORT.key] ?? -1;
+    if (av !== bv) return (av - bv) * mul;
+    return a.name.localeCompare(b.name); // tiebreak: name asc
+  });
+}
+
+// A valid identifier is either a version ("v…") or a sha of at least 10 hex chars.
+const RE_VERSION = /^v[0-9].*/i;
+const RE_SHA = /^[0-9a-f]{10,40}$/i;
+function tokenKind(tok) {
+  if (RE_VERSION.test(tok)) return "version";
+  if (RE_SHA.test(tok)) return "sha";
+  return null;
+}
+
+// Extension paths key a sha by its first 10 chars (full 40-char sha 404s).
+function normToken(tok) {
+  return tokenKind(tok) === "sha" ? tok.slice(0, 10) : tok;
+}
+
+// Parse "v1.5.3 | abcde12345" -> { version, sha, label, tokens, valid }
+function parseRelease(raw) {
+  const s = (raw || "").trim();
+  if (!s) return null;
+  const rawParts = s.split("|").map((x) => x.trim()).filter(Boolean);
+  const valid = rawParts.some((p) => tokenKind(p) !== null);
+  const parts = rawParts.map(normToken);
+  const version = parts[0] || "";
+  const sha = parts[1] || "";
+  return { raw: s, version, sha, label: version || sha, tokens: parts, valid };
+}
+
+async function pMap(items, fn, concurrency, onProgress) {
+  const results = new Array(items.length);
+  let idx = 0, done = 0;
+  async function worker() {
+    while (true) {
+      const i = idx++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+      done++;
+      if (onProgress) onProgress(done, items.length);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
+}
+
+// HEAD a single artifact. content-length is a CORS-safelisted header, so no preflight.
+async function head(url) {
+  try {
+    const r = await fetch(url, { method: "HEAD", redirect: "follow" });
+    if (r.ok) {
+      const len = r.headers.get("content-length");
+      return { ok: true, size: len ? parseInt(len, 10) : null };
+    }
+    return { ok: false };
+  } catch (e) {
+    return { ok: false, error: true };
+  }
+}
+
+function artUrl(base, token, platform, ext) {
+  // wasm targets ship uncompressed .wasm; everything else is gzipped.
+  const suffix = platform.startsWith("wasm") ? "duckdb_extension.wasm" : "duckdb_extension.gz";
+  return `${base}/${token}/${platform}/${ext}.${suffix}`;
+}
+
+// Resolve which path token (version vs sha) actually resolves for a repo/release,
+// by probing one sentinel extension on one platform.
+async function resolveToken(release, base, sentinelExt, sentinelPlatform) {
+  for (const tok of release.tokens) {
+    const r = await head(artUrl(base, tok, sentinelPlatform, sentinelExt));
+    if (r.ok) return tok;
+  }
+  // Fall back to the first token even if sentinel missed (sentinel may legitimately not exist).
+  return release.tokens[0];
+}
+
+// ---- Data fetch ---------------------------------------------------------
+async function fetchExtensionList() {
+  const out = [];
+  // Index JSON is shared across repos that point at the same name list (indexFrom),
+  // so fetch each distinct index once.
+  const indexCache = {};
+  async function getIndex(url) {
+    if (!indexCache[url]) {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Failed to fetch ${url} (${resp.status})`);
+      indexCache[url] = await resp.json();
+    }
+    return indexCache[url];
+  }
+
+  for (const repo of REPO_ORDER) {
+    if (!$(`opt-${repo}`).checked) continue;
+    const cfg = REPOS[repo];
+    const sourceId = cfg.indexFrom || repo;       // where the name list comes from
+    const json = await getIndex(REPOS[sourceId].index);
+    let names = Object.keys(json).filter((n) => n !== "_last_update");
+    const extra = REPOS[sourceId].extra;
+    if (extra) names = [...new Set([...names, ...extra])];
+    for (const name of names) {
+      if (EXCLUDE.has(`${name}@${repo}`)) continue;
+      // Download counts only apply to the repo that owns the index. A repo that
+      // borrows another's list (indexFrom, e.g. nightly) has no counts of its own.
+      const downloads = cfg.indexFrom ? null : (typeof json[name] === "number" ? json[name] : null);
+      out.push({ name, repo, base: cfg.base, downloads });
+    }
+  }
+  // Stable order: by repo order, alpha within.
+  const rank = (r) => REPO_ORDER.indexOf(r);
+  out.sort((a, b) => (a.repo === b.repo ? a.name.localeCompare(b.name) : rank(a.repo) - rank(b.repo)));
+  return out;
+}
+
+// --- Weekly download history (for the sparkline / vibe check) -------------
+// ISO-8601 week+year for a date.
+function isoWeekYear(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = (d.getUTCDay() + 6) % 7;          // Mon=0..Sun=6
+  d.setUTCDate(d.getUTCDate() - dayNum + 3);        // move to the week's Thursday
+  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round((d - firstThursday) / 604800000);
+  return { year: d.getUTCFullYear(), week };
+}
+function isoWeeksInYear(year) { return isoWeekYear(new Date(Date.UTC(year, 11, 28))).week; }
+
+async function fetchJsonOrNull(url) {
+  try { const r = await fetch(url); return r.ok ? await r.json() : null; }
+  catch (e) { return null; }
+}
+
+// For each stats-bearing repo, collect up to `points` most-recent AVAILABLE weeks.
+// Weeks can be missing, so we probe a wider `lookback` window and keep what exists.
+async function fetchWeeklyHistory(repoIds, points = 12, lookback = 18) {
+  const result = {};
+  await Promise.all(repoIds.map(async (repoId) => {
+    const base = REPOS[repoId].base;
+    const cands = [];
+    let { year, week } = isoWeekYear(new Date());
+    for (let i = 0; i < lookback; i++) {
+      cands.push({ year, week });
+      if (week > 1) week--; else { year--; week = isoWeeksInYear(year); }
+    }
+    const fetched = await Promise.all(cands.map(async (c) => {
+      const json = await fetchJsonOrNull(`${base}/download-stats-weekly/${c.year}/${c.week}.json`);
+      return json ? { ...c, counts: json } : null;
+    }));
+    result[repoId] = fetched.filter(Boolean)
+      .sort((a, b) => a.year - b.year || a.week - b.week)   // chronological
+      .slice(-points);
+  }));
+  return result;
+}
+
+// Scan one release into `scan.map` (shared/live), calling onCell(ext, platform)
+// as each result lands so the grid can update incrementally.
+async function scanRelease(release, extensions, platforms, scan, onProgress, onCell) {
+  // Resolve token per (repo) once.
+  const repos = [...new Set(extensions.map((e) => e.repo))];
+  for (const repo of repos) {
+    const sample = extensions.find((e) => e.repo === repo);
+    scan.tokens[repo] = await resolveToken(release, sample.base, sample.name, platforms[0]);
+  }
+
+  const tasks = [];
+  for (const ext of extensions) {
+    for (const platform of platforms) {
+      tasks.push({ ext, platform, token: scan.tokens[ext.repo] });
+    }
+  }
+  await pMap(
+    tasks,
+    async (t) => {
+      const res = await head(artUrl(t.ext.base, t.token, t.platform, t.ext.name));
+      scan.map[`${t.ext.repo}|${t.ext.name}|${t.platform}`] = res;
+      if (onCell) onCell(t.ext, t.platform);
+    },
+    CONCURRENCY,
+    onProgress
+  );
+}
+
+// ---- Render -------------------------------------------------------------
+let RENDER_STATE = null; // {extensions, platforms, relA, relB, scanA, scanB}
+
+function cellKey(ext, platform) { return `${ext.repo}|${ext.name}|${platform}`; }
+function cellId(ext, platform) { return `c:${cellKey(ext, platform)}`; }
+
+// Update a single platform cell in place (used while results stream in).
+function updateCellDom(ext, p) {
+  const td = document.getElementById(cellId(ext, p));
+  if (!td) return; // filtered out or not in the current view
+  const { relB, scanA, scanB } = RENDER_STATE;
+  const { cls, inner } = cellContent(ext, p, $("optSizes").checked, relB, scanA, scanB);
+  td.className = `plat-col ${cls}${td.dataset.first === "1" ? " fam-start" : ""}`;
+  td.innerHTML = inner;
+}
+
+function renderSummary() {
+  const { extensions, platforms, relA, relB, scanA, scanB } = RENDER_STATE;
+  const box = $("summary");
+  box.style.display = "flex";
+  function countAvail(scan) {
+    let c = 0;
+    for (const ext of extensions) for (const p of platforms) if (scan.map[cellKey(ext, p)]?.ok) c++;
+    return c;
+  }
+  const total = extensions.length * platforms.length;
+  let html = `<div class="stat"><b>${extensions.length}</b><span>extensions</span></div>`;
+  html += `<div class="stat"><b>${platforms.length}</b><span>platforms</span></div>`;
+  html += `<div class="stat"><b>${countAvail(scanA)} / ${total}</b><span>available · ${relA.label}</span></div>`;
+  if (relB) {
+    let added = 0, removed = 0, changed = 0;
+    for (const ext of extensions) for (const p of platforms) {
+      const a = scanA.map[cellKey(ext, p)]?.ok, b = scanB.map[cellKey(ext, p)]?.ok;
+      if (b && !a) added++;
+      else if (a && !b) removed++;
+      else if (a && b) {
+        const sa = scanA.map[cellKey(ext, p)].size, sb = scanB.map[cellKey(ext, p)].size;
+        if (sa != null && sb != null && sa !== sb) changed++;
+      }
+    }
+    html += `<div class="stat"><b>${countAvail(scanB)} / ${total}</b><span>available · ${relB.label}</span></div>`;
+    html += `<div class="stat"><b style="color:var(--new)">${added}</b><span>only B</span></div>`;
+    html += `<div class="stat"><b style="color:var(--gone)">${removed}</b><span>only A</span></div>`;
+    html += `<div class="stat"><b>${changed}</b><span>size changed</span></div>`;
+  }
+  box.innerHTML = html;
+
+  const showSizes = $("optSizes").checked;
+  if (relB) {
+    let lg = `<i class="chip-new">only B</i> = only in ${relB.label} &nbsp; <i class="chip-gone">only A</i> = only in ${relA.label}`;
+    if (showSizes) lg += ` &nbsp; <i class="chip-grow">▲</i> larger in B &nbsp; <i class="chip-shrink">▼</i> smaller in B`;
+    lg += ` &nbsp; · = absent both`;
+    $("legend").innerHTML = lg;
+  } else {
+    $("legend").innerHTML = showSizes
+      ? `size per available artifact · ${PRESENT_MARK} = available (no size) · · = 404 (not built)`
+      : `${PRESENT_MARK} = available · · = 404 (not built)`;
+  }
+}
+
+// Compute the class + inner HTML for one extension×platform cell.
+function cellContent(ext, p, showSizes, relB, scanA, scanB) {
+  const a = scanA.map[cellKey(ext, p)];
+  const b = relB ? scanB.map[cellKey(ext, p)] : undefined;
+  // Not yet scanned → pending (shown until both releases resolve the cell).
+  if (a === undefined || (relB && b === undefined)) return { cls: "cell-pending", inner: "" };
+  if (!relB) {
+    if (!a.ok) return { cls: "cell-absent", inner: "·" };
+    if (!showSizes || a.size == null) return { cls: "cell-avail", inner: PRESENT_MARK };
+    return { cls: "", inner: sizeFmt(a.size) };
+  }
+  const aOk = a.ok, bOk = b.ok;
+  if (!aOk && !bOk) return { cls: "cell-absent", inner: "·" };
+  if (bOk && !aOk) return { cls: "cell-new", inner: `${showSizes ? sizeOrAvail(b.size) : ""}<span class="delta">only B</span>` };
+  if (aOk && !bOk) return { cls: "cell-gone", inner: `${showSizes ? sizeOrAvail(a.size) : ""}<span class="delta">only A</span>` };
+  // both available
+  if (!showSizes) return { cls: "cell-avail", inner: PRESENT_MARK };
+  const sa = a.size, sb = b.size;
+  if (sa == null || sb == null) return { cls: "cell-avail", inner: sizeOrAvail(sb ?? sa) };
+  const diff = sa === 0 ? 0 : ((sb - sa) / sa) * 100;
+  let cls = "", arrow = "";
+  if (diff > 0.5) { cls = "cell-grow"; arrow = "▲"; }
+  else if (diff < -0.5) { cls = "cell-shrink"; arrow = "▼"; }
+  const deltaStr = Math.abs(diff) < 0.005 ? "=" : `${arrow} ${diff > 0 ? "+" : ""}${diff.toFixed(1)}%`;
+  return { cls, inner: `${sizeFmt(sb)}<span class="delta">${deltaStr}</span>` };
+}
+
+function renderGrid() {
+  const { extensions, platforms, relB, scanA, scanB } = RENDER_STATE;
+  // Terms separated by space/comma/semicolon, OR-matched: "httpfs;iceberg" shows both.
+  const terms = $("filter").value.toLowerCase().split(/[\s,;]+/).filter(Boolean);
+  const showSizes = $("optSizes").checked;
+  const showStats = $("optStats").checked;
+  const showSpark = $("optSpark").checked;
+  const tbl = $("grid");
+
+  const groups = groupPlatforms(platforms);
+  // Flat ordered platform list matching the grouped header, with a flag marking the
+  // first column of each family (for the visual divider).
+  const orderedPlats = [];
+  groups.forEach((g) => g.plats.forEach((p, i) => orderedPlats.push({ p, fam: g.fam, first: i === 0 })));
+
+  // <colgroup>: info columns get fixed widths; platform columns are auto, so under
+  // table-layout:fixed they split the remaining width equally (= space / #platforms).
+  let cols = `<col class="col-ext">`;
+  if (showStats) cols += STAT_COLUMNS.map(() => `<col class="col-dl">`).join("");
+  if (showSpark) cols += `<col class="col-spark">`;
+  cols += orderedPlats.map(() => `<col class="col-plat">`).join("");
+  const colgroup = `<colgroup>${cols}</colgroup>`;
+
+  // Row 1: family names spanning their arches. Row 2: short arch labels.
+  // Extension and stat headers are clickable to sort.
+  const arrow = (key) => (SORT.key === key ? (SORT.dir === "asc" ? " ▲" : " ▼") : ` <span class="sort-hint">↕</span>`);
+  let thead = `<thead><tr><th class='ext sortable' data-sort='name' rowspan='2'>Extension${arrow("name")}</th>`;
+  if (showStats) for (const col of STAT_COLUMNS) thead += `<th class='dl sortable' data-sort='${col.key}' rowspan='2'>${col.label}${arrow(col.key)}</th>`;
+  if (showSpark) thead += `<th class='spark-h' rowspan='2'>${STAT_WEEKS}wk</th>`;
+  for (const g of groups) thead += `<th class="fam-head" colspan="${g.plats.length}">${g.fam}_</th>`;
+  thead += "</tr><tr class='arch-head'>";
+  for (const { p, fam, first } of orderedPlats) thead += `<th class="plat-col${first ? " fam-start" : ""}">${shortArch(fam, p)}</th>`;
+  thead += "</tr></thead>";
+
+  let tbody = "<tbody>";
+  for (const ext of sortExtensions(extensions)) {
+    if (terms.length && !terms.some((t) => ext.name.toLowerCase().includes(t))) continue;
+    tbody += `<tr><td class="ext" title="${ext.name}">${ext.name} ${repoBadge(ext.repo)}</td>`;
+    if (showStats) for (const col of STAT_COLUMNS) tbody += `<td class="dl">${dlFmt(ext.stats?.[col.key])}</td>`;
+    if (showSpark) tbody += `<td class="spark-c spark-${ext.repo}">${ext.series?.length ? sparkline(ext.series) : "—"}</td>`;
+    for (const { p, first } of orderedPlats) {
+      const { cls, inner } = cellContent(ext, p, showSizes, relB, scanA, scanB);
+      tbody += `<td class="plat-col ${cls}${first ? " fam-start" : ""}" id="${cellId(ext, p)}" data-first="${first ? 1 : 0}">${inner}</td>`;
+    }
+    tbody += "</tr>";
+  }
+  tbody += "</tbody>";
+  tbl.innerHTML = colgroup + thead + tbody;
+}
+
+// ---- Orchestration ------------------------------------------------------
+function setProgress(done, total, phase) {
+  $("barWrap").classList.add("on");
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  $("barFill").style.width = pct + "%";
+  $("barLabel").textContent = `${phase}: ${done} / ${total} (${pct}%)`;
+}
+
+async function run() {
+  $("errBox").innerHTML = "";
+  const relA = parseRelease($("relA").value);
+  const relB = parseRelease($("relB").value);
+  if (!relA) { showErr("Enter at least Release A — a version (e.g. <code>v1.5.3</code>) or a ≥10-digit sha."); return; }
+  if (!relA.valid) { showErr(`Release A (<code>${relA.raw}</code>) must be a version (<code>v…</code>) or a ≥10-char hex sha.`); return; }
+  if (relB && !relB.valid) { showErr(`Release B (<code>${relB.raw}</code>) must be a version (<code>v…</code>) or a ≥10-char hex sha.`); return; }
+
+  const platforms = ALL_PLATFORMS;
+  if (!REPO_ORDER.some((r) => $(`opt-${r}`).checked)) { showErr("Select at least one repository."); return; }
+
+  $("goBtn").disabled = true;
+  $("summary").style.display = "none";
+  $("toolbar").style.display = "none";
+  $("tableWrap").style.display = "none";
+
+  try {
+    setProgress(0, 1, "Fetching extension lists");
+    const extensions = await fetchExtensionList();
+    if (!extensions.length) throw new Error("No extensions found in the index files.");
+
+    // Weekly download history (release-independent) → per-extension stat columns + series.
+    setProgress(0, 1, "Fetching download history");
+    const statsRepos = REPO_ORDER.filter((r) => $(`opt-${r}`).checked && !REPOS[r].indexFrom);
+    const trends = await fetchWeeklyHistory(statsRepos, STAT_WEEKS, STAT_WEEKS + 6);
+    for (const ext of extensions) {
+      const hist = trends[ext.repo];
+      ext.series = hist ? hist.map((w) => w.counts[ext.name] ?? 0) : [];
+      ext.stats = {};
+      for (const col of STAT_COLUMNS) {
+        ext.stats[col.key] = hist ? avgLastWeeks(hist, ext.name, col.weeks)
+          : (col.weeks === 1 ? ext.downloads : null);
+      }
+    }
+
+    const totalReleases = relB ? 2 : 1;
+    const scanA = { map: {}, tokens: {} };
+    const scanB = relB ? { map: {}, tokens: {} } : null;
+
+    // Render the skeleton up front (all cells pending), then fill cells as they stream in.
+    RENDER_STATE = { extensions, platforms, relA, relB, scanA, scanB };
+    renderGrid();
+    $("toolbar").style.display = "flex";
+    $("tableWrap").style.display = "block";
+
+    await scanRelease(relA, extensions, platforms, scanA,
+      (d, t) => setProgress(d, t, `Scanning ${relA.label} (1/${totalReleases})`),
+      (ext, p) => updateCellDom(ext, p));
+    if (relB) {
+      await scanRelease(relB, extensions, platforms, scanB,
+        (d, t) => setProgress(d, t, `Scanning ${relB.label} (2/2)`),
+        (ext, p) => updateCellDom(ext, p));
+    }
+
+    renderSummary();
+    renderGrid();
+    syncUrl();
+    $("barWrap").classList.remove("on");
+  } catch (e) {
+    const hint = location.protocol === "file:"
+      ? `<br><span class="sub"><b>You're viewing this via <code>file://</code></b> — browsers block its cross-origin fetches. Serve it over HTTP instead: <code>python3 -m http.server</code> in this folder, then open <code>http://localhost:8000</code>.</span>`
+      : `<br><span class="sub">Network/fetch error talking to extensions.duckdb.org. Check connectivity and retry.</span>`;
+    showErr(`<b>${e.message}</b>${hint}`);
+    $("barWrap").classList.remove("on");
+  } finally {
+    $("goBtn").disabled = false;
+  }
+}
+
+function showErr(msg) { $("errBox").innerHTML = `<div class="err">${msg}</div>`; }
+
+// --- URL state (shareable / bookmarkable) ---------------------------------
+function syncUrl() {
+  const p = new URLSearchParams();
+  const a = $("relA").value.trim(), b = $("relB").value.trim(), f = $("filter").value.trim();
+  if (a) p.set("a", a);
+  if (b) p.set("b", b);
+  p.set("repos", REPO_ORDER.filter((r) => $(`opt-${r}`).checked).join(","));
+  p.set("sizes", $("optSizes").checked ? "1" : "0");
+  p.set("stats", $("optStats").checked ? "1" : "0");
+  p.set("spark", $("optSpark").checked ? "1" : "0");
+  if (f) p.set("filter", f);
+  p.set("sort", `${SORT.key}.${SORT.dir}`);
+  history.replaceState(null, "", `?${p.toString()}`);
+}
+
+function applyUrl() {
+  const p = new URLSearchParams(location.search);
+  if (![...p.keys()].length) return;
+  if (p.has("a")) $("relA").value = p.get("a");
+  if (p.has("b")) $("relB").value = p.get("b");
+  if (p.has("repos")) {
+    const set = new Set(p.get("repos").split(",").filter(Boolean));
+    REPO_ORDER.forEach((r) => { $(`opt-${r}`).checked = set.has(r); });
+  }
+  if (p.has("sizes")) $("optSizes").checked = p.get("sizes") === "1";
+  if (p.has("stats")) $("optStats").checked = p.get("stats") === "1";
+  if (p.has("spark")) $("optSpark").checked = p.get("spark") === "1";
+  if (p.has("filter")) $("filter").value = p.get("filter");
+  if (p.has("sort")) {
+    const [k, d] = p.get("sort").split(".");
+    if (k) { SORT.key = k; SORT.dir = d === "desc" ? "desc" : "asc"; }
+  }
+}
+
+$("goBtn").addEventListener("click", run);
+$("filter").addEventListener("input", () => { if (RENDER_STATE) renderGrid(); syncUrl(); });
+$("optSizes").addEventListener("change", () => { if (RENDER_STATE) { renderSummary(); renderGrid(); } syncUrl(); });
+$("optStats").addEventListener("change", () => { if (RENDER_STATE) renderGrid(); syncUrl(); });
+$("optSpark").addEventListener("change", () => { if (RENDER_STATE) renderGrid(); syncUrl(); });
+
+// Click a sortable header to sort; click again to flip direction.
+$("grid").addEventListener("click", (e) => {
+  const th = e.target.closest("th[data-sort]");
+  if (!th || !RENDER_STATE) return;
+  const key = th.dataset.sort;
+  if (SORT.key === key) SORT.dir = SORT.dir === "asc" ? "desc" : "asc";
+  else { SORT.key = key; SORT.dir = key === "name" ? "asc" : "desc"; } // numbers: high→low first
+  renderGrid();
+  syncUrl();
+});
+[$("relA"), $("relB")].forEach((el) =>
+  el.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); }));
+
+$("presentLegend").innerHTML = PRESENT_MARK;
+
+// Restore state from the query string (?a=v1.5.3&b=v1.4.4&repos=…&sort=…), then auto-run.
+applyUrl();
+if (parseRelease($("relA").value)?.valid) run();
+</script>
+</body>
+</html>
