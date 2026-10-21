@@ -91,6 +91,11 @@
 
   .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
   .toolbar input { width: 340px; }
+  .toolbar .avail-label { font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+  .toolbar select {
+    padding: 6px 9px; font-size: 13px; border: 1px solid var(--line);
+    border-radius: 7px; background: #fff; cursor: pointer;
+  }
   .legend { font-size: 12px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
   .legend i { font-style: normal; padding: 1px 7px; border-radius: 4px; font-weight: 600; }
   .chip-new { background: #dafbe1; color: var(--new); }
@@ -207,6 +212,15 @@
 
   <div class="toolbar" id="toolbar" style="display:none">
     <input type="text" id="filter" placeholder="Filter extensions… (space-separated, e.g. httpfs iceberg)" autocomplete="off" />
+    <label class="avail-label" title="Per extension: present in a release = available on at least one platform">Availability:
+      <select id="availFilter">
+        <option value="all">all</option>
+        <option value="only-a">only A</option>
+        <option value="only-b">only B</option>
+        <option value="both">both</option>
+        <option value="none">none</option>
+      </select>
+    </label>
     <span class="legend" id="legend"></span>
   </div>
 
@@ -629,10 +643,22 @@ function cellContent(ext, p, showSizes, relB, scanA, scanB) {
   return { cls, inner: `${sizeFmt(sb)}<span class="delta">${deltaStr}</span>` };
 }
 
+// "Present in a release" = any platform has the artifact; without B, "only-a" = available.
+function rowAvail(ext) {
+  const { platforms, relB, scanA, scanB } = RENDER_STATE;
+  const anyOk = (scan) => platforms.some((p) => scan.map[cellKey(ext, p)]?.ok);
+  const a = anyOk(scanA), b = relB ? anyOk(scanB) : false;
+  if (a && b) return "both";
+  if (a) return "only-a";
+  if (b) return "only-b";
+  return "none";
+}
+
 function renderGrid() {
   const { extensions, platforms, relB, scanA, scanB } = RENDER_STATE;
   // Terms separated by space/comma/semicolon, OR-matched: "httpfs;iceberg" shows both.
   const terms = $("filter").value.toLowerCase().split(/[\s,;]+/).filter(Boolean);
+  const avail = $("availFilter").value;
   const showSizes = $("optSizes").checked;
   const showStats = $("optStats").checked;
   const showSpark = $("optSpark").checked;
@@ -666,6 +692,7 @@ function renderGrid() {
   let tbody = "<tbody>";
   for (const ext of sortExtensions(extensions)) {
     if (terms.length && !terms.some((t) => ext.name.toLowerCase().includes(t))) continue;
+    if (avail !== "all" && rowAvail(ext) !== avail) continue;
     tbody += `<tr><td class="ext" title="${ext.name}">${ext.name} ${repoBadge(ext.repo)}</td>`;
     if (showStats) for (const col of STAT_COLUMNS) tbody += `<td class="dl">${dlFmt(ext.stats?.[col.key])}</td>`;
     if (showSpark) tbody += `<td class="spark-c spark-${ext.repo}">${ext.series?.length ? sparkline(ext.series) : "—"}</td>`;
@@ -769,6 +796,8 @@ function syncUrl() {
   p.set("stats", $("optStats").checked ? "1" : "0");
   p.set("spark", $("optSpark").checked ? "1" : "0");
   if (f) p.set("filter", f);
+  const av = $("availFilter").value;
+  if (av !== "all") p.set("avail", av);
   p.set("sort", `${SORT.key}.${SORT.dir}`);
   history.replaceState(null, "", `?${p.toString()}`);
 }
@@ -786,6 +815,8 @@ function applyUrl() {
   if (p.has("stats")) $("optStats").checked = p.get("stats") === "1";
   if (p.has("spark")) $("optSpark").checked = p.get("spark") === "1";
   if (p.has("filter")) $("filter").value = p.get("filter");
+  if (p.has("avail") && [...$("availFilter").options].some((o) => o.value === p.get("avail")))
+    $("availFilter").value = p.get("avail");
   if (p.has("sort")) {
     const [k, d] = p.get("sort").split(".");
     if (k) { SORT.key = k; SORT.dir = d === "desc" ? "desc" : "asc"; }
@@ -794,6 +825,7 @@ function applyUrl() {
 
 $("goBtn").addEventListener("click", run);
 $("filter").addEventListener("input", () => { if (RENDER_STATE) renderGrid(); syncUrl(); });
+$("availFilter").addEventListener("change", () => { if (RENDER_STATE) renderGrid(); syncUrl(); });
 $("optSizes").addEventListener("change", () => { if (RENDER_STATE) { renderSummary(); renderGrid(); } syncUrl(); });
 $("optStats").addEventListener("change", () => { if (RENDER_STATE) renderGrid(); syncUrl(); });
 $("optSpark").addEventListener("change", () => { if (RENDER_STATE) renderGrid(); syncUrl(); });
