@@ -54,7 +54,8 @@
     padding: 12px 14px; background: var(--card); border: 1px solid var(--line);
     border-radius: 8px; margin-bottom: 16px;
   }
-  .options label { font-size: 13px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .options label, .toolbar .avail-label { font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+  .options label { cursor: pointer; }
   .options .platforms { flex: 1 1 360px; min-width: 280px; }
   .options .platforms input { font-size: 12px; padding: 6px 9px; }
 
@@ -91,6 +92,10 @@
 
   .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
   .toolbar input { width: 340px; }
+  .toolbar select {
+    padding: 6px 9px; font-size: 13px; border: 1px solid var(--line);
+    border-radius: 7px; background: #fff; cursor: pointer;
+  }
   .legend { font-size: 12px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
   .legend i { font-style: normal; padding: 1px 7px; border-radius: 4px; font-weight: 600; }
   .chip-new { background: #dafbe1; color: var(--new); }
@@ -207,6 +212,15 @@
 
   <div class="toolbar" id="toolbar" style="display:none">
     <input type="text" id="filter" placeholder="Filter extensions… (space-separated, e.g. httpfs iceberg)" autocomplete="off" />
+    <label class="avail-label" title="Keeps rows with at least one matching cell; none = absent on every platform in both">Availability:
+      <select id="availFilter">
+        <option value="all">all</option>
+        <option value="only-a">only A</option>
+        <option value="only-b">only B</option>
+        <option value="both">both</option>
+        <option value="none">none</option>
+      </select>
+    </label>
     <span class="legend" id="legend"></span>
   </div>
 
@@ -629,10 +643,27 @@ function cellContent(ext, p, showSizes, relB, scanA, scanB) {
   return { cls, inner: `${sizeFmt(sb)}<span class="delta">${deltaStr}</span>` };
 }
 
+// Cell-level, matching the legend chips ("only-a" = ≥1 cell A has and B lacks); without B, "only-a" means available.
+function rowMatchesAvail(ext, which, platforms, scanA, scanB) {
+  const cells = platforms.map((p) => ({
+    a: !!scanA.map[cellKey(ext, p)]?.ok,
+    b: !!scanB?.map[cellKey(ext, p)]?.ok,
+  }));
+  switch (which) {
+    case "only-a": return cells.some((c) => c.a && !c.b);
+    case "only-b": return cells.some((c) => c.b && !c.a);
+    case "both":   return cells.some((c) => c.a && c.b);
+    case "none":   return cells.every((c) => !c.a && !c.b);
+    default:       return true;
+  }
+}
+
 function renderGrid() {
   const { extensions, platforms, relB, scanA, scanB } = RENDER_STATE;
   // Terms separated by space/comma/semicolon, OR-matched: "httpfs;iceberg" shows both.
   const terms = $("filter").value.toLowerCase().split(/[\s,;]+/).filter(Boolean);
+  // Mid-scan, unscanned cells would misclassify rows — filter only on complete data.
+  const avail = RENDER_STATE.scanDone ? $("availFilter").value : "all";
   const showSizes = $("optSizes").checked;
   const showStats = $("optStats").checked;
   const showSpark = $("optSpark").checked;
@@ -666,6 +697,7 @@ function renderGrid() {
   let tbody = "<tbody>";
   for (const ext of sortExtensions(extensions)) {
     if (terms.length && !terms.some((t) => ext.name.toLowerCase().includes(t))) continue;
+    if (avail !== "all" && !rowMatchesAvail(ext, avail, platforms, scanA, scanB)) continue;
     tbody += `<tr><td class="ext" title="${ext.name}">${ext.name} ${repoBadge(ext.repo)}</td>`;
     if (showStats) for (const col of STAT_COLUMNS) tbody += `<td class="dl">${dlFmt(ext.stats?.[col.key])}</td>`;
     if (showSpark) tbody += `<td class="spark-c spark-${ext.repo}">${ext.series?.length ? sparkline(ext.series) : "—"}</td>`;
@@ -698,6 +730,12 @@ async function run() {
   const platforms = ALL_PLATFORMS;
   if (!REPO_ORDER.some((r) => $(`opt-${r}`).checked)) { showErr("Select at least one repository."); return; }
 
+  // "only B" and "both" can't match without a Release B.
+  for (const o of $("availFilter").options) {
+    if (o.value === "only-b" || o.value === "both") o.disabled = !relB;
+    if (o.disabled && o.selected) $("availFilter").value = "all";
+  }
+
   $("goBtn").disabled = true;
   $("summary").style.display = "none";
   $("toolbar").style.display = "none";
@@ -727,7 +765,8 @@ async function run() {
     const scanB = relB ? { map: {}, tokens: {} } : null;
 
     // Render the skeleton up front (all cells pending), then fill cells as they stream in.
-    RENDER_STATE = { extensions, platforms, relA, relB, scanA, scanB };
+    RENDER_STATE = { extensions, platforms, relA, relB, scanA, scanB, scanDone: false };
+    $("availFilter").disabled = true;
     renderGrid();
     $("toolbar").style.display = "flex";
     $("tableWrap").style.display = "block";
@@ -741,6 +780,7 @@ async function run() {
         (ext, p) => updateCellDom(ext, p));
     }
 
+    RENDER_STATE.scanDone = true;
     renderSummary();
     renderGrid();
     syncUrl();
@@ -753,6 +793,8 @@ async function run() {
     $("barWrap").classList.remove("on");
   } finally {
     $("goBtn").disabled = false;
+    // On a failed scan renderGrid keeps ignoring the filter, so keep it disabled too.
+    $("availFilter").disabled = !RENDER_STATE?.scanDone;
   }
 }
 
@@ -769,6 +811,8 @@ function syncUrl() {
   p.set("stats", $("optStats").checked ? "1" : "0");
   p.set("spark", $("optSpark").checked ? "1" : "0");
   if (f) p.set("filter", f);
+  const av = $("availFilter").value;
+  if (av !== "all") p.set("avail", av);
   p.set("sort", `${SORT.key}.${SORT.dir}`);
   history.replaceState(null, "", `?${p.toString()}`);
 }
@@ -786,6 +830,8 @@ function applyUrl() {
   if (p.has("stats")) $("optStats").checked = p.get("stats") === "1";
   if (p.has("spark")) $("optSpark").checked = p.get("spark") === "1";
   if (p.has("filter")) $("filter").value = p.get("filter");
+  if (p.has("avail") && [...$("availFilter").options].some((o) => o.value === p.get("avail")))
+    $("availFilter").value = p.get("avail");
   if (p.has("sort")) {
     const [k, d] = p.get("sort").split(".");
     if (k) { SORT.key = k; SORT.dir = d === "desc" ? "desc" : "asc"; }
@@ -794,6 +840,7 @@ function applyUrl() {
 
 $("goBtn").addEventListener("click", run);
 $("filter").addEventListener("input", () => { if (RENDER_STATE) renderGrid(); syncUrl(); });
+$("availFilter").addEventListener("change", () => { if (RENDER_STATE) renderGrid(); syncUrl(); });
 $("optSizes").addEventListener("change", () => { if (RENDER_STATE) { renderSummary(); renderGrid(); } syncUrl(); });
 $("optStats").addEventListener("change", () => { if (RENDER_STATE) renderGrid(); syncUrl(); });
 $("optSpark").addEventListener("change", () => { if (RENDER_STATE) renderGrid(); syncUrl(); });
