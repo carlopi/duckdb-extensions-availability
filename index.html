@@ -644,10 +644,10 @@ function cellContent(ext, p, showSizes, relB, scanA, scanB) {
 }
 
 // Cell-level, matching the legend chips ("only-a" = ≥1 cell A has and B lacks); without B, "only-a" means available.
-function rowMatchesAvail(ext, which, platforms, relB, scanA, scanB) {
+function rowMatchesAvail(ext, which, platforms, scanA, scanB) {
   const cells = platforms.map((p) => ({
     a: !!scanA.map[cellKey(ext, p)]?.ok,
-    b: !!(relB && scanB.map[cellKey(ext, p)]?.ok),
+    b: !!scanB?.map[cellKey(ext, p)]?.ok,
   }));
   switch (which) {
     case "only-a": return cells.some((c) => c.a && !c.b);
@@ -697,7 +697,7 @@ function renderGrid() {
   let tbody = "<tbody>";
   for (const ext of sortExtensions(extensions)) {
     if (terms.length && !terms.some((t) => ext.name.toLowerCase().includes(t))) continue;
-    if (avail !== "all" && !rowMatchesAvail(ext, avail, platforms, relB, scanA, scanB)) continue;
+    if (avail !== "all" && !rowMatchesAvail(ext, avail, platforms, scanA, scanB)) continue;
     tbody += `<tr><td class="ext" title="${ext.name}">${ext.name} ${repoBadge(ext.repo)}</td>`;
     if (showStats) for (const col of STAT_COLUMNS) tbody += `<td class="dl">${dlFmt(ext.stats?.[col.key])}</td>`;
     if (showSpark) tbody += `<td class="spark-c spark-${ext.repo}">${ext.series?.length ? sparkline(ext.series) : "—"}</td>`;
@@ -793,7 +793,8 @@ async function run() {
     $("barWrap").classList.remove("on");
   } finally {
     $("goBtn").disabled = false;
-    $("availFilter").disabled = false;
+    // On a failed scan renderGrid keeps ignoring the filter, so keep it disabled too.
+    $("availFilter").disabled = !RENDER_STATE?.scanDone;
   }
 }
 
